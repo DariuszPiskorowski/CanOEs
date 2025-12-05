@@ -4,10 +4,19 @@ name: Build Windows EXE
 on:
   workflow_dispatch:
     inputs:
-      version:
-        description: 'Version tag (e.g., 1.0.0)'
+      version_bump:
+        description: 'Version bump type'
+        required: true
+        default: 'patch'
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+      custom_version:
+        description: 'Custom version (leave empty for auto-increment)'
         required: false
-        default: '1.0.0'
+        default: ''
 
 jobs:
   build:
@@ -16,6 +25,58 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
+      with:
+        fetch-depth: 0  # Fetch all tags
+    
+    - name: Get latest version and calculate new version
+      id: version
+      shell: bash
+      run: |
+        # Get latest tag or default to v0.0.0
+        LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+        echo "Latest tag: $LATEST_TAG"
+        
+        # Remove 'v' prefix
+        LATEST_VERSION=${LATEST_TAG#v}
+        
+        # Parse version components
+        IFS='.' read -r MAJOR MINOR PATCH <<< "$LATEST_VERSION"
+        MAJOR=${MAJOR:-0}
+        MINOR=${MINOR:-0}
+        PATCH=${PATCH:-0}
+        
+        echo "Current version: $MAJOR.$MINOR.$PATCH"
+        
+        # Check if custom version provided
+        if [ -n "${{ github.event.inputs.custom_version }}" ]; then
+          NEW_VERSION="${{ github.event.inputs.custom_version }}"
+          echo "Using custom version: $NEW_VERSION"
+        else
+          # Auto-increment based on bump type
+          case "${{ github.event.inputs.version_bump }}" in
+            major)
+              MAJOR=$((MAJOR + 1))
+              MINOR=0
+              PATCH=0
+              ;;
+            minor)
+              MINOR=$((MINOR + 1))
+              PATCH=0
+              ;;
+            patch)
+              PATCH=$((PATCH + 1))
+              ;;
+          esac
+          NEW_VERSION="$MAJOR.$MINOR.$PATCH"
+          echo "Auto-incremented version (${{ github.event.inputs.version_bump }}): $NEW_VERSION"
+        fi
+        
+        echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
+        echo "new_tag=v$NEW_VERSION" >> $GITHUB_OUTPUT
+        echo ""
+        echo "========================================"
+        echo "  Building CanOEs v$NEW_VERSION"
+        echo "========================================"
     
     - name: Set up Python
       uses: actions/setup-python@v5
@@ -42,29 +103,37 @@ jobs:
     - name: Upload EXE artifact
       uses: actions/upload-artifact@v4
       with:
-        name: CanOEs-v${{ github.event.inputs.version }}-Windows
+        name: CanOEs-${{ steps.version.outputs.new_tag }}-Windows
         path: release/
-        retention-days: 9
+        retention-days: 90
     
-    - name: Create Release (optional)
-      if: github.event.inputs.version != '1.0.0'
+    - name: Create GitHub Release
       uses: softprops/action-gh-release@v1
       with:
-        tag_name: v${{ github.event.inputs.version }}
-        name: CanOEs v${{ github.event.inputs.version }}
+        tag_name: ${{ steps.version.outputs.new_tag }}
+        name: CanOEs ${{ steps.version.outputs.new_tag }}
         body: |
-          ## CanOEs v${{ github.event.inputs.version }}
+          ## CanOEs ${{ steps.version.outputs.new_tag }}
           
           CAN/CAN FD communication tool for Vector VN1640A
           
+          ### What's New
+          - Built from commit: ${{ github.sha }}
+          - Build date: ${{ github.event.repository.updated_at }}
+          
           ### Downloads
-          - `CanOEs.exe` - Standalone Windows executable
+          - `CanOEs.exe` - Standalone Windows executable (no Python required)
           - `CanOEs_User_Manual.pdf` - User documentation
           
           ### Requirements
           - Windows 10/11
-          - Vector VN1640A hardware
+          - Vector VN1640A hardware (or compatible VN16xx)
           - Vector XL Driver Library installed
+          
+          ### Installation
+          1. Download `CanOEs.exe`
+          2. Run directly - no installation needed
+          3. Ensure Vector drivers are installed
         files: |
           release/CanOEs.exe
           release/CanOEs_User_Manual.pdf
