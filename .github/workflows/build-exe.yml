@@ -1,0 +1,74 @@
+name: Build Windows EXE
+
+# Manual trigger only - not on every push
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag (e.g., 1.0.0)'
+        required: false
+        default: '1.0.0'
+
+jobs:
+  build:
+    runs-on: windows-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install pyinstaller
+    
+    - name: Build EXE with PyInstaller
+      run: |
+        pyinstaller --onefile --windowed --name "CanOEs" --icon=NONE --add-data "vn1640a_can.py;." can_gui.py
+    
+    - name: Create release package
+      run: |
+        mkdir release
+        copy dist\CanOEs.exe release\
+        copy README.md release\ 2>nul || echo "No README"
+        copy docs\CanOEs_User_Manual.pdf release\ 2>nul || echo "No PDF manual"
+      shell: cmd
+    
+    - name: Upload EXE artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: CanOEs-v${{ github.event.inputs.version }}-Windows
+        path: release/
+        retention-days: 9
+    
+    - name: Create Release (optional)
+      if: github.event.inputs.version != '1.0.0'
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: v${{ github.event.inputs.version }}
+        name: CanOEs v${{ github.event.inputs.version }}
+        body: |
+          ## CanOEs v${{ github.event.inputs.version }}
+          
+          CAN/CAN FD communication tool for Vector VN1640A
+          
+          ### Downloads
+          - `CanOEs.exe` - Standalone Windows executable
+          - `CanOEs_User_Manual.pdf` - User documentation
+          
+          ### Requirements
+          - Windows 10/11
+          - Vector VN1640A hardware
+          - Vector XL Driver Library installed
+        files: |
+          release/CanOEs.exe
+          release/CanOEs_User_Manual.pdf
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
