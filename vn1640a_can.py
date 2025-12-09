@@ -50,6 +50,7 @@ XL_CHIP_STATE = 4
 XL_TRANSMIT_MSG = 10
 XL_CAN_EV_TAG_RX_OK = 0x0400
 XL_CAN_EV_TAG_TX_OK = 0x0401
+XL_CAN_EV_TAG_TX_MSG = 0x0440  # Tag dla wysyłania CAN FD
 
 # Flagi wiadomości CAN
 XL_CAN_EXT_MSG_ID = 0x80000000  # Extended ID (29-bit)
@@ -171,9 +172,9 @@ class XLcanRxEvent(Structure):
     ]
 
 
-class XLcanTxEvent(Structure):
-    """Struktura wysyłanej wiadomości CAN FD."""
-    _pack_ = 1
+# Struktura wiadomości CAN FD do wysyłania (wewnętrzna)
+class s_xl_can_tx_msg(Structure):
+    """Wewnętrzna struktura wiadomości CAN FD do wysyłania."""
     _fields_ = [
         ("canId", c_uint),
         ("msgFlags", c_uint),
@@ -182,24 +183,36 @@ class XLcanTxEvent(Structure):
         ("data", c_ubyte * 64),
     ]
 
+# Union dla tagData w XLcanTxEvent
+class s_txTagData(Union):
+    _fields_ = [
+        ("canMsg", s_xl_can_tx_msg),
+    ]
+
+class XLcanTxEvent(Structure):
+    """Struktura wysyłanej wiadomości CAN FD - zgodna z python-can i V4 API."""
+    _fields_ = [
+        ("tag", c_ushort),         # 0x0440 = XL_CAN_EV_TAG_TX_MSG
+        ("transId", c_ushort),     # 0xFFFF
+        ("chanIndex", c_ubyte),    # indeks kanału
+        ("reserved", c_ubyte * 3), # wyrównanie
+        ("tagData", s_txTagData),  # wiadomość CAN
+    ]
+
 
 class XLcanFdConf(Structure):
-    """Konfiguracja CAN FD."""
+    """Konfiguracja CAN FD - UWAGA: wszystkie pola muszą być c_uint!"""
     _pack_ = 1
     _fields_ = [
         ("arbitrationBitRate", c_uint),
-        ("sjwAbr", c_ubyte),
-        ("tseg1Abr", c_ubyte),
-        ("tseg2Abr", c_ubyte),
-        ("reserved1", c_ubyte),
+        ("sjwAbr", c_uint),
+        ("tseg1Abr", c_uint),
+        ("tseg2Abr", c_uint),
         ("dataBitRate", c_uint),
-        ("sjwDbr", c_ubyte),
-        ("tseg1Dbr", c_ubyte),
-        ("tseg2Dbr", c_ubyte),
-        ("reserved2", c_ubyte),
-        ("reserved3", c_ubyte * 2),
-        ("options", c_ushort),
-        ("reserved4", c_ubyte * 8),
+        ("sjwDbr", c_uint),
+        ("tseg1Dbr", c_uint),
+        ("tseg2Dbr", c_uint),
+        ("reserved", c_uint * 2),
     ]
 
 
@@ -357,6 +370,16 @@ class VN1640A:
         except OSError as e:
             print(f"[BŁĄD] Nie można załadować vxlapi64.dll: {e}")
             return False
+        
+        # Ustaw argtypes dla xlCanTransmitEx (kluczowe dla CAN FD!)
+        self.dll.xlCanTransmitEx.argtypes = [
+            c_int,                      # portHandle (XLportHandle = c_long/c_int)
+            c_uint64,                   # accessMask (XLaccess = c_uint64)
+            c_uint,                     # msgCnt
+            POINTER(c_uint),            # pMsgCntSent
+            POINTER(XLcanTxEvent)       # pXlCanTxEvt
+        ]
+        self.dll.xlCanTransmitEx.restype = c_int
         
         status = self.dll.xlOpenDriver()
         if status != XL_SUCCESS:
@@ -540,13 +563,13 @@ class VN1640A:
         fd_conf.arbitrationBitRate = self.baudrate
         fd_conf.dataBitRate = self.baudrate_fd
         
-        # Domyślne parametry timingu (dla 500k/2M)
+        # Parametry timingu (sprawdzone - działające wartości)
         fd_conf.sjwAbr = 2
-        fd_conf.tseg1Abr = 63
-        fd_conf.tseg2Abr = 16
+        fd_conf.tseg1Abr = 6
+        fd_conf.tseg2Abr = 3
         fd_conf.sjwDbr = 2
-        fd_conf.tseg1Dbr = 15
-        fd_conf.tseg2Dbr = 4
+        fd_conf.tseg1Dbr = 6
+        fd_conf.tseg2Dbr = 3
         
         status = self.dll.xlCanFdSetConfiguration(
             self.port_handle,
@@ -712,31 +735,43 @@ class VN1640A:
             print("[WARN] Nie jesteś w trybie FD. Używam send() dla CAN klasyczny.")
             return self.send(msg_id, data[:8], extended)
         
+        # Konwersja bytes na list
+        if isinstance(data, bytes):
+            data = list(data)
+        
         tx_event = XLcanTxEvent()
         
+        # Ustaw nagłówek (tag, transId, chanIndex)
+        tx_event.tag = XL_CAN_EV_TAG_TX_MSG  # 0x0440
+        tx_event.transId = 0xFFFF
+        tx_event.chanIndex = 0  # indeks kanału (0-based)
+        
+        # Ustaw dane wiadomości
         if extended:
-            tx_event.canId = (msg_id & 0x1FFFFFFF) | XL_CAN_EXT_MSG_ID
+            tx_event.tagData.canMsg.canId = (msg_id & 0x1FFFFFFF) | XL_CAN_EXT_MSG_ID
         else:
-            tx_event.canId = msg_id & 0x7FF
+            tx_event.tagData.canMsg.canId = msg_id & 0x7FF
         
         flags = 0
         if fd:
             flags |= XL_CAN_TXMSG_FLAG_EDL
         if brs and fd:
             flags |= XL_CAN_TXMSG_FLAG_BRS
-        tx_event.msgFlags = flags
+        tx_event.tagData.canMsg.msgFlags = flags
         
         data_len = min(len(data), 64 if fd else 8)
-        tx_event.dlc = self._bytes_to_dlc(data_len)
+        tx_event.tagData.canMsg.dlc = self._bytes_to_dlc(data_len)
         
         for i in range(data_len):
-            tx_event.data[i] = data[i]
+            tx_event.tagData.canMsg.data[i] = data[i]
         
         msg_count = c_uint(1)
+        msg_sent = c_uint(0)
         status = self.dll.xlCanTransmitEx(
             self.port_handle,
             self.channel_mask,
-            byref(msg_count),
+            msg_count,           # wartość, nie pointer
+            byref(msg_sent),     # pointer na liczbę wysłanych
             byref(tx_event)
         )
         
