@@ -6,9 +6,11 @@ Data: 2024
 """
 
 import ctypes
+import os
+import sys
 from ctypes import c_uint, c_int, c_char, c_ubyte, c_ushort, c_ulong, c_ulonglong
 from ctypes import Structure, POINTER, byref, sizeof, create_string_buffer
-from typing import Optional, List, Dict, Tuple
+from typing import Optional, List, Dict, Tuple, Callable
 from enum import IntEnum, IntFlag
 from dataclasses import dataclass
 import time
@@ -19,7 +21,7 @@ import time
 # ============================================================================
 
 # Ścieżka do biblioteki Vector XL Driver
-VXLAPI_DLL = "vxlapi64.dll"  # Dla 64-bit, użyj "vxlapi.dll" dla 32-bit
+VXLAPI_DLL = os.getenv("VXLAPI_DLL", "vxlapi64.dll")  # Dla 64-bit, użyj "vxlapi.dll" dla 32-bit
 
 # Status kody
 XL_SUCCESS = 0
@@ -156,6 +158,7 @@ class XLdriverConfig(Structure):
 @dataclass
 class CANMessage:
     """Reprezentacja wiadomości CAN."""
+
     id: int
     data: bytes
     dlc: int = None
@@ -163,13 +166,34 @@ class CANMessage:
     channel: int = 0
     is_extended: bool = False
     is_remote: bool = False
-    
+
     def __post_init__(self):
+        if not isinstance(self.data, (bytes, bytearray, memoryview)):
+            raise TypeError("data musi być typu bytes, bytearray lub memoryview")
+
+        # Wyrównaj typ do bytes dla spójnego serializowania
+        if not isinstance(self.data, bytes):
+            self.data = bytes(self.data)
+
+        if self.id < 0:
+            raise ValueError("Identyfikator CAN nie może być ujemny")
+
+        max_id = 0x1FFFFFFF if self.is_extended else 0x7FF
+        if self.id > max_id:
+            raise ValueError(
+                "Identyfikator CAN przekracza zakres: "
+                "użyj is_extended=True dla ramek 29-bitowych"
+            )
+
         if self.dlc is None:
             self.dlc = len(self.data)
-        # Upewnij się, że data ma max 8 bajtów
         if len(self.data) > 8:
-            self.data = self.data[:8]
+            raise ValueError(
+                "Długość danych przekracza 8 bajtów dla klasycznego CAN. "
+                "Zastosuj CAN FD lub skróć payload."
+            )
+        if self.dlc != len(self.data):
+            raise ValueError("DLC musi odpowiadać długości danych dla klasycznego CAN")
     
     def __repr__(self):
         hex_data = ' '.join(f'{b:02X}' for b in self.data)
@@ -189,7 +213,11 @@ class VectorCANInterface:
     # VN1640A ma 4 kanały CAN
     MAX_CHANNELS = 4
     
-    def __init__(self, dll_path: str = VXLAPI_DLL):
+    def __init__(
+        self,
+        dll_path: str = VXLAPI_DLL,
+        dll_loader: Optional[Callable[[str], ctypes.CDLL]] = None,
+    ):
         """
         Inicjalizacja interfejsu.
         
@@ -198,6 +226,7 @@ class VectorCANInterface:
         """
         self.dll_path = dll_path
         self.dll: Optional[ctypes.CDLL] = None
+        self.dll_loader = dll_loader
         self.driver_config: Optional[XLdriverConfig] = None
         
         # Stan kanałów
@@ -219,8 +248,21 @@ class VectorCANInterface:
         
     def load_dll(self) -> bool:
         """Ładuje bibliotekę Vector XL Driver."""
+        if self.dll_loader:
+            self.dll = self.dll_loader(self.dll_path)
+            if not self.dll:
+                raise RuntimeError("Nie udało się załadować biblioteki przez custom dll_loader")
+            print(f"[OK] Załadowano bibliotekę przez dostarczony loader: {self.dll_path}")
+            return True
+
+        if sys.platform != "win32":
+            raise RuntimeError(
+                "Sterownik Vector XL dostępny jest tylko na Windows. "
+                "Ustaw zmienną VXLAPI_DLL lub podaj dll_loader, aby wstrzyknąć niestandardowy mechanizm ładowania."
+            )
+
         try:
-            self.dll = ctypes.windll.LoadLibrary(self.dll_path)
+            self.dll = ctypes.WinDLL(self.dll_path)
             print(f"[OK] Załadowano bibliotekę: {self.dll_path}")
             return True
         except OSError as e:
