@@ -187,13 +187,19 @@ class CANMessage:
 
         if self.dlc is None:
             self.dlc = len(self.data)
-        if len(self.data) > 8:
-            raise ValueError(
-                "Długość danych przekracza 8 bajtów dla klasycznego CAN. "
-                "Zastosuj CAN FD lub skróć payload."
-            )
-        if self.dlc != len(self.data):
-            raise ValueError("DLC musi odpowiadać długości danych dla klasycznego CAN")
+        if self.is_remote:
+            if len(self.data) > 0:
+                raise ValueError("Ramki zdalne (RTR) nie powinny zawierać danych")
+            if not (0 <= self.dlc <= 8):
+                raise ValueError("DLC dla ramek zdalnych musi być w zakresie 0-8")
+        else:
+            if len(self.data) > 8:
+                raise ValueError(
+                    "Długość danych przekracza 8 bajtów dla klasycznego CAN. "
+                    "Zastosuj CAN FD lub skróć payload."
+                )
+            if self.dlc != len(self.data):
+                raise ValueError("DLC musi odpowiadać długości danych dla klasycznego CAN")
     
     def __repr__(self):
         hex_data = ' '.join(f'{b:02X}' for b in self.data)

@@ -55,6 +55,20 @@ def test_can_message_accepts_extended_id_with_flag():
     assert msg.id == 0x1ABCDEF
 
 
+def test_can_message_allows_remote_frame_with_dlc_and_no_payload():
+    msg = CANMessage(id=0x100, data=b"", dlc=8, is_remote=True)
+    assert msg.dlc == 8
+    assert msg.data == b""
+
+
+def test_can_message_rejects_remote_frame_with_payload_or_invalid_dlc():
+    with pytest.raises(ValueError):
+        CANMessage(id=0x100, data=b"\x01", is_remote=True)
+
+    with pytest.raises(ValueError):
+        CANMessage(id=0x100, data=b"", dlc=9, is_remote=True)
+
+
 def test_can_message_coerces_bytearray_and_validates_type():
     payload = bytearray([0x01, 0x02])
     msg = CANMessage(id=0x10, data=payload)
