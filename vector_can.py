@@ -1,8 +1,6 @@
 """
 Interfejs CAN dla Vector VN1640A używając biblioteki python-can
 Prostsza i bardziej stabilna wersja
-
-Autor: GitHub Copilot
 """
 
 import can
