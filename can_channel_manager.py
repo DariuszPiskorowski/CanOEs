@@ -1,8 +1,3 @@
-"""
-Interaktywny menedżer kanałów CAN dla VN1640A
-Prosty interfejs do włączania/wyłączania kanałów i testowania komunikacji
-"""
-
 import time
 from typing import Callable, Optional
 
