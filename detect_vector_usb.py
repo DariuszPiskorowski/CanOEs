@@ -1,7 +1,7 @@
 """
 Skrypt do wykrywania urządzeń USB Vector (CANoe/CANalyzer)
-Autor: GitHub Copilot
-Data: 2024
+Autor: D. Piskorowski
+Data: December.2025
 """
 
 import subprocess
