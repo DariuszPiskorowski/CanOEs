@@ -1,8 +1,6 @@
 """
 Interfejs komunikacji CAN z urządzeniem Vector VN1640A
 Obsługa 4 kanałów CAN z możliwością włączania/wyłączania
-Autor: GitHub Copilot
-Data: 2024
 """
 
 import ctypes
