@@ -257,6 +257,13 @@ class CANMsg:
         
         max_len = 64 if self.is_fd else 8
         if len(self.data) > max_len:
+            import warnings
+            warnings.warn(
+                f"Dane obcięte z {len(self.data)} do {max_len} bajtów "
+                f"({'CAN FD' if self.is_fd else 'CAN klasyczny'})",
+                UserWarning,
+                stacklevel=2
+            )
             self.data = self.data[:max_len]
     
     def _bytes_to_dlc(self, num_bytes: int) -> int:
@@ -655,6 +662,21 @@ class VN1640A:
             # Extended ID (29-bit)
             vn.send(0x12345678, [0x11, 0x22], extended=True)
         """
+        # Walidacja msg_id
+        if msg_id < 0:
+            print("[BŁĄD] ID wiadomości nie może być ujemne")
+            return False
+        
+        max_id = 0x1FFFFFFF if extended else 0x7FF
+        if msg_id > max_id:
+            print(f"[BŁĄD] ID 0x{msg_id:X} przekracza zakres {'29-bit (0x1FFFFFFF)' if extended else '11-bit (0x7FF)'}")
+            return False
+        
+        # Walidacja data
+        if not isinstance(data, (list, bytes, bytearray)):
+            print(f"[BŁĄD] Dane muszą być typu list, bytes lub bytearray, otrzymano: {type(data).__name__}")
+            return False
+        
         if not self.is_on_bus:
             print("[BŁĄD] Nie jesteś on bus! Użyj start() lub start_fd()")
             return False
@@ -727,6 +749,26 @@ class VN1640A:
             # Klasyczna ramka CAN przez interfejs FD
             vn.send_fd(0x123, [0x11, 0x22], fd=False)
         """
+        # Walidacja msg_id
+        if msg_id < 0:
+            print("[BŁĄD] ID wiadomości nie może być ujemne")
+            return False
+        
+        max_id = 0x1FFFFFFF if extended else 0x7FF
+        if msg_id > max_id:
+            print(f"[BŁĄD] ID 0x{msg_id:X} przekracza zakres {'29-bit (0x1FFFFFFF)' if extended else '11-bit (0x7FF)'}")
+            return False
+        
+        # Walidacja data
+        if not isinstance(data, (list, bytes, bytearray)):
+            print(f"[BŁĄD] Dane muszą być typu list, bytes lub bytearray, otrzymano: {type(data).__name__}")
+            return False
+        
+        max_data_len = 64 if fd else 8
+        if len(data) > max_data_len:
+            print(f"[BŁĄD] Długość danych ({len(data)} bajtów) przekracza maksymalną dla {'CAN FD' if fd else 'CAN klasyczny'} ({max_data_len} bajtów)")
+            return False
+        
         if not self.is_on_bus:
             print("[BŁĄD] Nie jesteś on bus!")
             return False
@@ -818,6 +860,11 @@ class VN1640A:
     
     def send_msg(self, msg: CANMsg) -> bool:
         """Wysyła obiekt CANMsg."""
+        # Walidacja msg
+        if not isinstance(msg, CANMsg):
+            print(f"[BŁĄD] Argument musi być typu CANMsg, otrzymano: {type(msg).__name__}")
+            return False
+        
         if msg.is_fd or self.is_fd_mode:
             return self.send_fd(
                 msg.id, 
