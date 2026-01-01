@@ -1,0 +1,13 @@
+# CanOEs - Vector VN1640A CAN Interface
+# Python 3.9+
+# Windows 10/11 only
+
+# Python-CAN library (for vector_can.py module)
+python-can>=4.0.0
+
+# GUI dependencies
+# tkinter is included in standard Python installation on Windows
+
+# Development dependencies (optional)
+pytest>=7.0.0
+pytest-mock>=3.10.0
